@@ -70,6 +70,8 @@ module Homebrew
 
       def fatal_setup_build_environment_checks
         %w[
+          check_xcode_minimum_version
+          check_clt_minimum_version
           check_if_supported_sdk_available
         ].freeze
       end
@@ -105,11 +107,12 @@ module Homebrew
 
       def check_for_unsupported_macos
         return if Homebrew::EnvConfig.developer?
+        return if ENV["HOMEBREW_INTEGRATION_TEST"]
 
         who = +"We"
-        what = if OS::Mac.prerelease?
+        what = if OS::Mac.version.prerelease?
           "pre-release version"
-        elsif OS::Mac.outdated_release?
+        elsif OS::Mac.version.outdated_release?
           who << " (and Apple)"
           "old version"
         end
@@ -139,7 +142,7 @@ module Homebrew
           #{MacOS::Xcode.update_instructions}
         EOS
 
-        if OS::Mac.prerelease?
+        if OS::Mac.version.prerelease?
           current_path = Utils.popen_read("/usr/bin/xcode-select", "-p")
           message += <<~EOS
             If #{MacOS::Xcode.latest_version} is installed, you may need to:
@@ -199,7 +202,7 @@ module Homebrew
 
       def check_ruby_version
         return if RUBY_VERSION == HOMEBREW_REQUIRED_RUBY_VERSION
-        return if Homebrew::EnvConfig.developer? && OS::Mac.prerelease?
+        return if Homebrew::EnvConfig.developer? && OS::Mac.version.prerelease?
 
         <<~EOS
           Ruby version #{RUBY_VERSION} is unsupported on #{MacOS.version}. Homebrew
@@ -316,10 +319,18 @@ module Homebrew
         end
 
         if gettext&.linked_keg&.directory?
-          homebrew_owned = @found.all? do |path|
-            Pathname.new(path).realpath.to_s.start_with? "#{HOMEBREW_CELLAR}/gettext"
+          allowlist = ["#{HOMEBREW_CELLAR}/gettext"]
+          if Hardware::CPU.physical_cpu_arm64?
+            allowlist += %W[
+              #{HOMEBREW_MACOS_ARM_DEFAULT_PREFIX}/Cellar/gettext
+              #{HOMEBREW_DEFAULT_PREFIX}/Cellar/gettext
+            ]
           end
-          return if homebrew_owned
+
+          return if @found.all? do |path|
+            realpath = Pathname.new(path).realpath.to_s
+            allowlist.any? { |rack| realpath.start_with?(rack) }
+          end
         end
 
         inject_file_list @found, <<~EOS
@@ -425,9 +436,13 @@ module Homebrew
         locator = MacOS.sdk_locator
 
         source = if locator.source == :clt
+          return if MacOS::CLT.below_minimum_version? # Handled by other diagnostics.
+
           update_instructions = MacOS::CLT.update_instructions
           "Command Line Tools (CLT)"
         else
+          return if MacOS::Xcode.below_minimum_version? # Handled by other diagnostics.
+
           update_instructions = MacOS::Xcode.update_instructions
           "Xcode"
         end

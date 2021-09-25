@@ -2,7 +2,7 @@
 # frozen_string_literal: true
 
 require "delegate"
-
+require "api"
 require "cli/args"
 
 module Homebrew
@@ -45,16 +45,18 @@ module Homebrew
       # the formula and prints a warning unless `only` is specified.
       sig {
         params(
-          only:               T.nilable(Symbol),
-          ignore_unavailable: T.nilable(T::Boolean),
-          method:             T.nilable(Symbol),
-          uniq:               T::Boolean,
+          only:                    T.nilable(Symbol),
+          ignore_unavailable:      T.nilable(T::Boolean),
+          method:                  T.nilable(Symbol),
+          uniq:                    T::Boolean,
+          prefer_loading_from_api: T::Boolean,
         ).returns(T::Array[T.any(Formula, Keg, Cask::Cask)])
       }
-      def to_formulae_and_casks(only: parent&.only_formula_or_cask, ignore_unavailable: nil, method: nil, uniq: true)
+      def to_formulae_and_casks(only: parent&.only_formula_or_cask, ignore_unavailable: nil, method: nil, uniq: true,
+                                prefer_loading_from_api: false)
         @to_formulae_and_casks ||= {}
         @to_formulae_and_casks[only] ||= downcased_unique_named.flat_map do |name|
-          load_formula_or_cask(name, only: only, method: method)
+          load_formula_or_cask(name, only: only, method: method, prefer_loading_from_api: prefer_loading_from_api)
         rescue FormulaUnreadableError, FormulaClassUnavailableError,
                TapFormulaUnreadableError, TapFormulaClassUnavailableError,
                Cask::CaskUnreadableError
@@ -75,7 +77,7 @@ module Homebrew
       def to_formulae_to_casks(only: parent&.only_formula_or_cask, method: nil)
         @to_formulae_to_casks ||= {}
         @to_formulae_to_casks[[method, only]] = to_formulae_and_casks(only: only, method: method)
-                                                .partition { |o| o.is_a?(Formula) }
+                                                .partition { |o| o.is_a?(Formula) || o.is_a?(Keg) }
                                                 .map(&:freeze).freeze
       end
 
@@ -88,18 +90,29 @@ module Homebrew
         end.uniq.freeze
       end
 
-      def load_formula_or_cask(name, only: nil, method: nil)
+      def load_formula_or_cask(name, only: nil, method: nil, prefer_loading_from_api: false)
         unreadable_error = nil
 
         if only != :cask
+          if prefer_loading_from_api && ENV["HOMEBREW_INSTALL_FROM_API"].present? &&
+             Homebrew::API::Bottle.available?(name)
+            Homebrew::API::Bottle.fetch_bottles(name)
+          end
+
           begin
             formula = case method
             when nil, :factory
               Formulary.factory(name, *spec, force_bottle: @force_bottle, flags: @flags)
             when :resolve
               resolve_formula(name)
+            when :latest_kegs
+              resolve_latest_keg(name)
+            when :default_kegs
+              resolve_default_keg(name)
             when :keg
-              resolve_keg(name)
+              odeprecated "`load_formula_or_cask` with `method: :keg`",
+                          "`load_formula_or_cask` with `method: :default_kegs`"
+              resolve_default_keg(name)
             when :kegs
               _, kegs = resolve_kegs(name)
               kegs
@@ -120,9 +133,14 @@ module Homebrew
         end
 
         if only != :formula
+          if prefer_loading_from_api && ENV["HOMEBREW_INSTALL_FROM_API"].present? &&
+             Homebrew::API::CaskSource.available?(name)
+            contents = Homebrew::API::CaskSource.fetch(name)
+          end
+
           begin
             config = Cask::Config.from_args(@parent) if @cask_options
-            cask = Cask::CaskLoader.load(name, config: config)
+            cask = Cask::CaskLoader.load(contents || name, config: config)
 
             if unreadable_error.present?
               onoe <<~EOS
@@ -209,9 +227,33 @@ module Homebrew
       end
 
       sig { returns(T::Array[Keg]) }
+      def to_default_kegs
+        @to_default_kegs ||= begin
+          to_formulae_and_casks(only: :formula, method: :default_kegs).freeze
+        rescue NoSuchKegError => e
+          if (reason = MissingFormula.suggest_command(e.name, "uninstall"))
+            $stderr.puts reason
+          end
+          raise e
+        end
+      end
+
+      sig { returns(T::Array[Keg]) }
+      def to_latest_kegs
+        @to_latest_kegs ||= begin
+          to_formulae_and_casks(only: :formula, method: :latest_kegs).freeze
+        rescue NoSuchKegError => e
+          if (reason = MissingFormula.suggest_command(e.name, "uninstall"))
+            $stderr.puts reason
+          end
+          raise e
+        end
+      end
+
+      sig { returns(T::Array[Keg]) }
       def to_kegs
         @to_kegs ||= begin
-          to_formulae_and_casks(only: :formula, method: :keg).freeze
+          to_formulae_and_casks(only: :formula, method: :kegs).freeze
         rescue NoSuchKegError => e
           if (reason = MissingFormula.suggest_command(e.name, "uninstall"))
             $stderr.puts reason
@@ -225,7 +267,7 @@ module Homebrew
           .returns([T::Array[Keg], T::Array[Cask::Cask]])
       }
       def to_kegs_to_casks(only: parent&.only_formula_or_cask, ignore_unavailable: nil, all_kegs: nil)
-        method = all_kegs ? :kegs : :keg
+        method = all_kegs ? :kegs : :default_kegs
         @to_kegs_to_casks ||= {}
         @to_kegs_to_casks[method] ||=
           to_formulae_and_casks(only: only, ignore_unavailable: ignore_unavailable, method: method)
@@ -282,7 +324,24 @@ module Homebrew
         [rack, kegs]
       end
 
-      def resolve_keg(name)
+      def resolve_latest_keg(name)
+        _, kegs = resolve_kegs(name)
+
+        # Return keg if it is the only installed keg
+        return kegs if kegs.length == 1
+
+        stable_kegs = kegs.reject { |k| k.version.head? }
+
+        if stable_kegs.blank?
+          return kegs.max_by do |keg|
+            [Tab.for_keg(keg).source_modified_time, keg.version.revision]
+          end
+        end
+
+        stable_kegs.max_by(&:version)
+      end
+
+      def resolve_default_keg(name)
         rack, kegs = resolve_kegs(name)
 
         linked_keg_ref = HOMEBREW_LINKED_KEGS/rack.basename

@@ -2,6 +2,7 @@
 # frozen_string_literal: true
 
 require "cache_store"
+require "did_you_mean"
 require "formula_support"
 require "lock_file"
 require "formula_pin"
@@ -28,6 +29,7 @@ require "mktemp"
 require "find"
 require "utils/spdx"
 require "extend/on_os"
+require "api"
 
 # A formula provides instructions and metadata for Homebrew to install a piece
 # of software. Every Homebrew formula is a {Formula}.
@@ -62,7 +64,7 @@ class Formula
   include Utils::Shebang
   include Utils::Shell
   include Context
-  include OnOS
+  include OnOS # TODO: 3.3.0: deprecate OnOS usage in instance methods.
   extend Enumerable
   extend Forwardable
   extend Cachable
@@ -308,7 +310,13 @@ class Formula
 
   # The path that was specified to find this formula.
   def specified_path
-    alias_path || path
+    default_specified_path = Pathname(alias_path) if alias_path.present?
+    default_specified_path ||= path
+
+    return default_specified_path if default_specified_path.presence&.exist?
+    return local_bottle_path if local_bottle_path.presence&.exist?
+
+    default_specified_path
   end
 
   # The name specified to find this formula.
@@ -365,6 +373,13 @@ class Formula
   sig { returns(T.nilable(Bottle)) }
   def bottle
     @bottle ||= Bottle.new(self, bottle_specification) if bottled?
+  end
+
+  # The Bottle object for given tag.
+  # @private
+  sig { params(tag: T.nilable(Symbol)).returns(T.nilable(Bottle)) }
+  def bottle_for_tag(tag = nil)
+    Bottle.new(self, bottle_specification, tag) if bottled?(tag)
   end
 
   # The description of the software.
@@ -478,6 +493,9 @@ class Formula
   # Dependencies provided by macOS for the currently active {SoftwareSpec}.
   delegate uses_from_macos_elements: :active_spec
 
+  # Dependency names provided by macOS for the currently active {SoftwareSpec}.
+  delegate uses_from_macos_names: :active_spec
+
   # The {Requirement}s for the currently active {SoftwareSpec}.
   delegate requirements: :active_spec
 
@@ -511,7 +529,14 @@ class Formula
   # exists and is not empty.
   # @private
   def latest_version_installed?
-    (dir = latest_installed_prefix).directory? && !dir.children.empty?
+    latest_prefix = if !head? && ENV["HOMEBREW_INSTALL_FROM_API"].present? &&
+                       (latest_pkg_version = Homebrew::API::Versions.latest_formula_version(name))
+      prefix latest_pkg_version
+    else
+      latest_installed_prefix
+    end
+
+    (dir = latest_prefix).directory? && !dir.children.empty?
   end
 
   # If at least one version of {Formula} is installed.
@@ -971,13 +996,13 @@ class Formula
   # The generated launchd {.plist} file path.
   sig { returns(Pathname) }
   def plist_path
-    prefix/"#{plist_name}.plist"
+    opt_prefix/"#{plist_name}.plist"
   end
 
   # The generated systemd {.service} file path.
   sig { returns(Pathname) }
   def systemd_service_path
-    prefix/"#{service_name}.service"
+    opt_prefix/"#{service_name}.service"
   end
 
   # The service specification of the software.
@@ -1268,7 +1293,18 @@ class Formula
         staging.retain! if interactive || debug?
         raise
       ensure
-        cp Dir["config.log", "CMakeCache.txt"], logs
+        %w[
+          config.log
+          CMakeCache.txt
+          CMakeOutput.log
+          CMakeError.log
+        ].each do |logfile|
+          Dir["**/#{logfile}"].each do |logpath|
+            destdir = logs/File.dirname(logpath)
+            mkdir_p destdir
+            cp logpath, destdir
+          end
+        end
       end
     end
   ensure
@@ -1313,6 +1349,11 @@ class Formula
     Formula.cache[:outdated_kegs][cache_key] ||= begin
       all_kegs = []
       current_version = T.let(false, T::Boolean)
+      latest_version = if !head? && ENV["HOMEBREW_INSTALL_FROM_API"].present? && (core_formula? || tap.blank?)
+        Homebrew::API::Versions.latest_formula_version(name) || pkg_version
+      else
+        pkg_version
+      end
 
       installed_kegs.each do |keg|
         all_kegs << keg
@@ -1320,8 +1361,8 @@ class Formula
         next if version.head?
 
         tab = Tab.for_keg(keg)
-        next if version_scheme > tab.version_scheme && pkg_version != version
-        next if version_scheme == tab.version_scheme && pkg_version > version
+        next if version_scheme > tab.version_scheme && latest_version != version
+        next if version_scheme == tab.version_scheme && latest_version > version
 
         # don't consider this keg current if there's a newer formula available
         next if follow_installed_alias? && new_formula_available?
@@ -1448,9 +1489,9 @@ class Formula
   end
 
   # Standard parameters for cargo builds.
-  sig { returns(T::Array[T.any(String, Pathname)]) }
-  def std_cargo_args
-    ["--locked", "--root", prefix, "--path", "."]
+  sig { params(root: T.any(String, Pathname), path: String).returns(T::Array[T.any(String, Pathname)]) }
+  def std_cargo_args(root: prefix, path: ".")
+    ["--locked", "--root", root, "--path", path]
   end
 
   # Standard parameters for CMake builds.
@@ -1458,15 +1499,19 @@ class Formula
   # Setting `CMAKE_FIND_FRAMEWORK` to "LAST" tells CMake to search for our
   # libraries before trying to utilize Frameworks, many of which will be from
   # 3rd party installs.
-  sig { returns(T::Array[String]) }
-  def std_cmake_args
+  sig {
+    params(
+      install_prefix: T.any(String, Pathname),
+      install_libdir: String,
+      find_framework: String,
+    ).returns(T::Array[String])
+  }
+  def std_cmake_args(install_prefix: prefix, install_libdir: "lib", find_framework: "LAST")
     args = %W[
-      -DCMAKE_C_FLAGS_RELEASE=-DNDEBUG
-      -DCMAKE_CXX_FLAGS_RELEASE=-DNDEBUG
-      -DCMAKE_INSTALL_PREFIX=#{prefix}
-      -DCMAKE_INSTALL_LIBDIR=lib
+      -DCMAKE_INSTALL_PREFIX=#{install_prefix}
+      -DCMAKE_INSTALL_LIBDIR=#{install_libdir}
       -DCMAKE_BUILD_TYPE=Release
-      -DCMAKE_FIND_FRAMEWORK=LAST
+      -DCMAKE_FIND_FRAMEWORK=#{find_framework}
       -DCMAKE_VERBOSE_MAKEFILE=ON
       -Wno-dev
       -DBUILD_TESTING=OFF
@@ -1540,6 +1585,51 @@ class Formula
   def rpath
     "@loader_path/../lib"
   end
+
+  # Creates a new `Time` object for use in the formula as the build time.
+  #
+  # @see https://www.rubydoc.info/stdlib/time/Time Time
+  sig { returns(Time) }
+  def time
+    if ENV["SOURCE_DATE_EPOCH"].present?
+      Time.at(ENV["SOURCE_DATE_EPOCH"].to_i).utc
+    else
+      Time.now.utc
+    end
+  end
+
+  # Replaces a universal binary with its native slice.
+  #
+  # If called with no parameters, does this with all compatible
+  # universal binaries in a {Formula}'s {Keg}.
+  sig { params(targets: T.nilable(T.any(Pathname, String))).void }
+  def deuniversalize_machos(*targets)
+    targets = nil if targets.blank?
+    targets ||= any_installed_keg.mach_o_files.select do |file|
+      file.arch == :universal && file.archs.include?(Hardware::CPU.arch)
+    end
+
+    targets.each { |t| extract_macho_slice_from(Pathname.new(t), Hardware::CPU.arch) }
+  end
+
+  # @private
+  sig { params(file: Pathname, arch: T.nilable(Symbol)).void }
+  def extract_macho_slice_from(file, arch = Hardware::CPU.arch)
+    odebug "Extracting #{arch} slice from #{file}"
+    file.ensure_writable do
+      macho = MachO::FatFile.new(file)
+      native_slice = macho.extract(Hardware::CPU.arch)
+      native_slice.write file
+      MachO.codesign! file if Hardware::CPU.arm?
+    rescue MachO::MachOBinaryError
+      onoe "#{file} is not a universal binary"
+      raise
+    rescue NoMethodError
+      onoe "#{file} does not contain an #{arch} slice"
+      raise
+    end
+  end
+  private :extract_macho_slice_from
 
   # an array of all core {Formula} names
   # @private
@@ -1671,6 +1761,13 @@ class Formula
   # @private
   def self.core_alias_reverse_table
     CoreTap.instance.alias_reverse_table
+  end
+
+  # Returns a list of approximately matching formula names, but not the complete match
+  # @private
+  def self.fuzzy_search(name)
+    @spell_checker ||= DidYouMean::SpellChecker.new(dictionary: Set.new(names + full_names).to_a)
+    @spell_checker.correct(name)
   end
 
   def self.[](name)
@@ -1815,7 +1912,6 @@ class Formula
   # @private
   def to_hash
     dependencies = deps
-    uses_from_macos = uses_from_macos_elements || []
 
     hsh = {
       "name"                     => name,
@@ -1853,7 +1949,7 @@ class Formula
       "optional_dependencies"    => dependencies.select(&:optional?)
                                                 .map(&:name)
                                                 .uniq,
-      "uses_from_macos"          => uses_from_macos.uniq,
+      "uses_from_macos"          => uses_from_macos_elements.uniq,
       "requirements"             => [],
       "conflicts_with"           => conflicts.map(&:name),
       "caveats"                  => caveats&.gsub(HOMEBREW_PREFIX, "$(brew --prefix)"),
@@ -1910,6 +2006,32 @@ class Formula
     hsh
   end
 
+  # @api private
+  # Generate a hash to be used to install a formula from a JSON file
+  def to_recursive_bottle_hash(top_level: true)
+    bottle = bottle_hash
+
+    bottles = bottle["files"].map do |tag, file|
+      info = { "url" => file["url"] }
+      info["sha256"] = file["sha256"] if tap.name != "homebrew/core"
+      [tag.to_s, info]
+    end.to_h
+
+    hash = {
+      "name"        => name,
+      "pkg_version" => pkg_version,
+      "rebuild"     => bottle["rebuild"],
+      "bottles"     => bottles,
+    }
+
+    return hash unless top_level
+
+    hash["dependencies"] = declared_runtime_dependencies.map do |dep|
+      dep.to_formula.to_recursive_bottle_hash(top_level: false)
+    end
+    hash
+  end
+
   # Returns the bottle information for a formula
   def bottle_hash
     bottle_spec = stable.bottle_specification
@@ -1918,17 +2040,17 @@ class Formula
       "root_url" => bottle_spec.root_url,
       "files"    => {},
     }
-    bottle_spec.collector.each_key do |os|
-      collector_os = bottle_spec.collector[os]
-      os_cellar = collector_os[:cellar]
-      os_cellar = os_cellar.is_a?(Symbol) ? os_cellar.inspect : os_cellar
+    bottle_spec.collector.each_tag do |tag|
+      tag_spec = bottle_spec.collector.specification_for(tag)
+      os_cellar = tag_spec.cellar
+      os_cellar = os_cellar.inspect if os_cellar.is_a?(Symbol)
 
-      checksum = collector_os[:checksum].hexdigest
-      filename = Bottle::Filename.create(self, os, bottle_spec.rebuild)
+      checksum = tag_spec.checksum.hexdigest
+      filename = Bottle::Filename.create(self, tag, bottle_spec.rebuild)
       path, = Utils::Bottles.path_resolved_basename(bottle_spec.root_url, name, checksum, filename)
       url = "#{bottle_spec.root_url}/#{path}"
 
-      hash["files"][os] = {
+      hash["files"][tag.to_sym] = {
         "cellar" => os_cellar,
         "url"    => url,
         "sha256" => checksum,
@@ -2182,7 +2304,9 @@ class Formula
     eligible_for_cleanup = []
     if latest_version_installed?
       eligible_kegs = if head? && (head_prefix = latest_head_prefix)
-        installed_kegs - [Keg.new(head_prefix)]
+        head, stable = installed_kegs.partition { |k| k.version.head? }
+        # Remove newest head and stable kegs
+        head - [Keg.new(head_prefix)] + stable.sort_by(&:version).slice(0...-1)
       else
         installed_kegs.select do |keg|
           tab = Tab.for_keg(keg)
@@ -2918,27 +3042,54 @@ class Formula
     #
     # If `satisfy` returns `false` then a bottle will not be used and instead
     # the {Formula} will be built from source and `reason` will be printed.
-    def pour_bottle?(&block)
+    #
+    # Alternatively, a preset reason can be passed as a symbol:
+    # <pre>pour_bottle? only_if: :clt_installed</pre>
+    def pour_bottle?(only_if: nil, &block)
       @pour_bottle_check = PourBottleCheck.new(self)
+
+      if only_if.present? && block.present?
+        raise ArgumentError, "Do not pass both a preset condition and a block to `pour_bottle?`"
+      end
+
+      block ||= case only_if
+      when :clt_installed
+        lambda do |_|
+          on_macos do
+            T.cast(self, PourBottleCheck).reason(+<<~EOS)
+              The bottle needs the Apple Command Line Tools to be installed.
+                You can install them, if desired, with:
+                  xcode-select --install
+            EOS
+            T.cast(self, PourBottleCheck).satisfy { MacOS::CLT.installed? }
+          end
+        end
+      when :default_prefix
+        lambda do |_|
+          T.cast(self, PourBottleCheck).reason(+<<~EOS)
+            The bottle needs to be installed into #{Homebrew::DEFAULT_PREFIX}.
+          EOS
+          T.cast(self, PourBottleCheck).satisfy { HOMEBREW_PREFIX.to_s == Homebrew::DEFAULT_PREFIX }
+        end
+      else
+        raise ArgumentError, "Invalid preset `pour_bottle?` condition" if only_if.present?
+      end
+
       @pour_bottle_check.instance_eval(&block)
     end
 
-    # Deprecates a {Formula} (on a given date, if provided) so a warning is
+    # Deprecates a {Formula} (on the given date) so a warning is
     # shown on each installation. If the date has not yet passed the formula
     # will not be deprecated.
     # <pre>deprecate! date: "2020-08-27", because: :unmaintained</pre>
     # <pre>deprecate! date: "2020-08-27", because: "has been replaced by foo"</pre>
     # @see https://docs.brew.sh/Deprecating-Disabling-and-Removing-Formulae
     # @see DeprecateDisable::DEPRECATE_DISABLE_REASONS
-    def deprecate!(date: nil, because: nil)
-      odisabled "`deprecate!` without a reason", "`deprecate! because: \"reason\"`" if because.blank?
-      odisabled "`deprecate!` without a date", "`deprecate! date: \"#{Date.today}\"`" if date.blank?
+    def deprecate!(date:, because:)
+      @deprecation_date = Date.parse(date)
+      return if @deprecation_date > Date.today
 
-      @deprecation_date = Date.parse(date) if date.present?
-
-      return if date.present? && Date.parse(date) > Date.today
-
-      @deprecation_reason = because if because.present?
+      @deprecation_reason = because
       @deprecated = true
     end
 
@@ -2962,26 +3113,23 @@ class Formula
     # @see .deprecate!
     attr_reader :deprecation_reason
 
-    # Disables a {Formula} (on a given date, if provided) so it cannot be
+    # Disables a {Formula} (on the given date) so it cannot be
     # installed. If the date has not yet passed the formula
     # will be deprecated instead of disabled.
     # <pre>disable! date: "2020-08-27", because: :does_not_build</pre>
     # <pre>disable! date: "2020-08-27", because: "has been replaced by foo"</pre>
     # @see https://docs.brew.sh/Deprecating-Disabling-and-Removing-Formulae
     # @see DeprecateDisable::DEPRECATE_DISABLE_REASONS
-    def disable!(date: nil, because: nil)
-      odisabled "`disable!` without a reason", "`disable! because: \"reason\"`" if because.blank?
-      odisabled "`disable!` without a date", "`disable! date: \"#{Date.today}\"`" if date.blank?
+    def disable!(date:, because:)
+      @disable_date = Date.parse(date)
 
-      @disable_date = Date.parse(date) if date.present?
-
-      if @disable_date && @disable_date > Date.today
-        @deprecation_reason = because if because.present?
+      if @disable_date > Date.today
+        @deprecation_reason = because
         @deprecated = true
         return
       end
 
-      @disable_reason = because if because.present?
+      @disable_reason = because
       @disabled = true
     end
 

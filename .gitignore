@@ -14,6 +14,7 @@
 /Library/Homebrew/test/.gem
 /Library/Homebrew/test/.subversion
 /Library/Homebrew/test/coverage
+/Library/Homebrew/test/junit
 /Library/Homebrew/test/fs_leak_log
 /Library/Homebrew/vendor/portable-ruby
 /Library/Taps
@@ -126,6 +127,7 @@
 **/vendor/bundle/ruby/*/gems/pry-*/
 **/vendor/bundle/ruby/*/gems/racc-*/
 **/vendor/bundle/ruby/*/gems/rainbow-*/
+**/vendor/bundle/ruby/*/gems/rbi-*/
 **/vendor/bundle/ruby/*/gems/rdiscount-*/
 **/vendor/bundle/ruby/*/gems/regexp_parser-*/
 **/vendor/bundle/ruby/*/gems/rexml-*/
@@ -133,6 +135,7 @@
 **/vendor/bundle/ruby/*/gems/rspec-*/
 **/vendor/bundle/ruby/*/gems/rspec-core-*/
 **/vendor/bundle/ruby/*/gems/rspec-expectations-*/
+**/vendor/bundle/ruby/*/gems/rspec_junit_formatter-*/
 **/vendor/bundle/ruby/*/gems/rspec-its-*/
 **/vendor/bundle/ruby/*/gems/rspec-mocks-*/
 **/vendor/bundle/ruby/*/gems/rspec-retry-*/
@@ -155,6 +158,7 @@
 **/vendor/bundle/ruby/*/gems/unf_ext-*/
 **/vendor/bundle/ruby/*/gems/unf-*/
 **/vendor/bundle/ruby/*/gems/unicode-display_width-*/
+**/vendor/bundle/ruby/*/gems/unparser-*/
 **/vendor/bundle/ruby/*/gems/uri_template-*/
 **/vendor/bundle/ruby/*/gems/webrobots-*/
 
@@ -192,5 +196,7 @@
 # Unignore tests' bundle config
 !/Library/Homebrew/test/.bundle/config
 
-# Unignore vscode configuration
+# Unignore editor configuration
+!/.sublime
+/.sublime/homebrew.sublime-workspace
 !/.vscode

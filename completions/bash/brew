@@ -124,6 +124,8 @@ _brew___cache() {
   case "${cur}" in
     -*)
       __brewcomp "
+      --HEAD
+      --bottle-tag
       --build-from-source
       --cask
       --debug
@@ -282,6 +284,7 @@ _brew__s() {
       --opensuse
       --pull-request
       --quiet
+      --repology
       --ubuntu
       --verbose
       "
@@ -519,6 +522,7 @@ _brew_bump_revision() {
       --message
       --quiet
       --verbose
+      --write-only
       "
       return
       ;;
@@ -745,6 +749,23 @@ _brew_desc() {
   __brew_complete_formulae
 }
 
+_brew_developer() {
+  local cur="${COMP_WORDS[COMP_CWORD]}"
+  case "${cur}" in
+    -*)
+      __brewcomp "
+      --debug
+      --help
+      --quiet
+      --verbose
+      "
+      return
+      ;;
+    *)
+  esac
+  __brewcomp "state on off"
+}
+
 _brew_dispatch_build_bottle() {
   local cur="${COMP_WORDS[COMP_CWORD]}"
   case "${cur}" in
@@ -754,6 +775,8 @@ _brew_dispatch_build_bottle() {
       --help
       --issue
       --linux
+      --linux-self-hosted
+      --linux-wheezy
       --macos
       --quiet
       --tap
@@ -871,6 +894,7 @@ _brew_fetch() {
     -*)
       __brewcomp "
       --HEAD
+      --bottle-tag
       --build-bottle
       --build-from-source
       --cask
@@ -1135,6 +1159,7 @@ _brew_install_bundler_gems() {
     -*)
       __brewcomp "
       --debug
+      --groups
       --help
       --quiet
       --verbose
@@ -1163,6 +1188,32 @@ _brew_irb() {
   esac
 }
 
+_brew_lc() {
+  local cur="${COMP_WORDS[COMP_CWORD]}"
+  case "${cur}" in
+    -*)
+      __brewcomp "
+      --all
+      --cask
+      --debug
+      --formula
+      --full-name
+      --help
+      --installed
+      --json
+      --newer-only
+      --quiet
+      --tap
+      --verbose
+      "
+      return
+      ;;
+    *)
+  esac
+  __brew_complete_formulae
+  __brew_complete_casks
+}
+
 _brew_leaves() {
   local cur="${COMP_WORDS[COMP_CWORD]}"
   case "${cur}" in
@@ -1170,6 +1221,8 @@ _brew_leaves() {
       __brewcomp "
       --debug
       --help
+      --installed-as-dependency
+      --installed-on-request
       --quiet
       --verbose
       "
@@ -1184,6 +1237,7 @@ _brew_link() {
   case "${cur}" in
     -*)
       __brewcomp "
+      --HEAD
       --debug
       --dry-run
       --force
@@ -1278,6 +1332,7 @@ _brew_ln() {
   case "${cur}" in
     -*)
       __brewcomp "
+      --HEAD
       --debug
       --dry-run
       --force
@@ -1366,6 +1421,7 @@ _brew_migrate() {
     -*)
       __brewcomp "
       --debug
+      --dry-run
       --force
       --help
       --quiet
@@ -1376,26 +1432,6 @@ _brew_migrate() {
     *)
   esac
   __brew_complete_installed_formulae
-}
-
-_brew_mirror() {
-  local cur="${COMP_WORDS[COMP_CWORD]}"
-  case "${cur}" in
-    -*)
-      __brewcomp "
-      --bintray-org
-      --bintray-repo
-      --debug
-      --help
-      --no-publish
-      --quiet
-      --verbose
-      "
-      return
-      ;;
-    *)
-  esac
-  __brew_complete_formulae
 }
 
 _brew_missing() {
@@ -1447,6 +1483,8 @@ _brew_outdated() {
       --fetch-HEAD
       --formula
       --greedy
+      --greedy-auto-updates
+      --greedy-latest
       --help
       --json
       --quiet
@@ -1503,6 +1541,7 @@ _brew_pr_automerge() {
       --debug
       --help
       --ignore-failures
+      --no-autosquash
       --publish
       --quiet
       --tap
@@ -1523,9 +1562,11 @@ _brew_pr_publish() {
     -*)
       __brewcomp "
       --autosquash
+      --branch
       --debug
       --help
       --message
+      --no-autosquash
       --quiet
       --tap
       --verbose
@@ -1545,8 +1586,6 @@ _brew_pr_pull() {
       --archive-item
       --artifact
       --autosquash
-      --bintray-mirror
-      --bintray-org
       --branch-okay
       --clean
       --committer
@@ -1557,7 +1596,6 @@ _brew_pr_pull() {
       --keep-old
       --message
       --no-commit
-      --no-publish
       --no-upload
       --quiet
       --resolve
@@ -1580,7 +1618,6 @@ _brew_pr_upload() {
     -*)
       __brewcomp "
       --archive-item
-      --bintray-org
       --committer
       --debug
       --dry-run
@@ -1588,7 +1625,6 @@ _brew_pr_upload() {
       --help
       --keep-old
       --no-commit
-      --no-publish
       --quiet
       --root-url
       --root-url-using
@@ -1656,6 +1692,7 @@ _brew_reinstall() {
       --force
       --force-bottle
       --formula
+      --git
       --help
       --input-methoddir
       --interactive
@@ -1694,23 +1731,6 @@ _brew_release() {
       --help
       --major
       --minor
-      --quiet
-      --verbose
-      "
-      return
-      ;;
-    *)
-  esac
-}
-
-_brew_release_notes() {
-  local cur="${COMP_WORDS[COMP_CWORD]}"
-  case "${cur}" in
-    -*)
-      __brewcomp "
-      --debug
-      --help
-      --markdown
       --quiet
       --verbose
       "
@@ -1804,6 +1824,7 @@ _brew_search() {
       --opensuse
       --pull-request
       --quiet
+      --repology
       --ubuntu
       --verbose
       "
@@ -2318,6 +2339,8 @@ _brew_upgrade() {
       --force-bottle
       --formula
       --greedy
+      --greedy-auto-updates
+      --greedy-latest
       --help
       --ignore-pinned
       --input-methoddir
@@ -2394,32 +2417,32 @@ _brew() {
   local i=1 cmd
 
   # find the subcommand
-  while [[ "$i" -lt "$COMP_CWORD" ]]
+  while [[ "${i}" -lt "${COMP_CWORD}" ]]
   do
     local s="${COMP_WORDS[i]}"
-    case "$s" in
+    case "${s}" in
       --*)
-        cmd="$s"
+        cmd="${s}"
         break
         ;;
       -*)
         ;;
       *)
-        cmd="$s"
+        cmd="${s}"
         break
         ;;
     esac
     (( i++ ))
   done
 
-  if [[ "$i" -eq "$COMP_CWORD" ]]
+  if [[ "${i}" -eq "${COMP_CWORD}" ]]
   then
     __brew_complete_commands
     return
   fi
 
   # subcommands have their own completion functions
-  case "$cmd" in
+  case "${cmd}" in
     --cache) _brew___cache ;;
     --caskroom) _brew___caskroom ;;
     --cellar) _brew___cellar ;;
@@ -2448,6 +2471,7 @@ _brew() {
     create) _brew_create ;;
     deps) _brew_deps ;;
     desc) _brew_desc ;;
+    developer) _brew_developer ;;
     dispatch-build-bottle) _brew_dispatch_build_bottle ;;
     doctor) _brew_doctor ;;
     dr) _brew_dr ;;
@@ -2465,6 +2489,7 @@ _brew() {
     install) _brew_install ;;
     install-bundler-gems) _brew_install_bundler_gems ;;
     irb) _brew_irb ;;
+    lc) _brew_lc ;;
     leaves) _brew_leaves ;;
     link) _brew_link ;;
     linkage) _brew_linkage ;;
@@ -2475,7 +2500,6 @@ _brew() {
     ls) _brew_ls ;;
     man) _brew_man ;;
     migrate) _brew_migrate ;;
-    mirror) _brew_mirror ;;
     missing) _brew_missing ;;
     options) _brew_options ;;
     outdated) _brew_outdated ;;
@@ -2489,7 +2513,6 @@ _brew() {
     readall) _brew_readall ;;
     reinstall) _brew_reinstall ;;
     release) _brew_release ;;
-    release-notes) _brew_release_notes ;;
     remove) _brew_remove ;;
     rm) _brew_rm ;;
     ruby) _brew_ruby ;;

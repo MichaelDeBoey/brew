@@ -14,6 +14,7 @@ module OS
       extend T::Sig
 
       SYMBOLS = {
+        monterey:    "12",
         big_sur:     "11",
         catalina:    "10.15",
         mojave:      "10.14",
@@ -22,6 +23,18 @@ module OS
         el_capitan:  "10.11",
         yosemite:    "10.10",
       }.freeze
+
+      # TODO: bump version when new macOS is released or announced
+      # and also update references in docs/Installation.md and
+      # https://github.com/Homebrew/install/blob/HEAD/install.sh
+      MACOS_NEWEST_UNSUPPORTED = "12.0"
+      private_constant :MACOS_NEWEST_UNSUPPORTED
+
+      # TODO: bump version when new macOS is released and also update
+      # references in docs/Installation.md and
+      # https://github.com/Homebrew/install/blob/HEAD/install.sh
+      MACOS_OLDEST_SUPPORTED = "10.14"
+      private_constant :MACOS_OLDEST_SUPPORTED
 
       sig { params(version: Symbol).returns(T.attached_class) }
       def self.from_symbol(version)
@@ -70,6 +83,16 @@ module OS
       sig { returns(String) }
       def pretty_name
         @pretty_name ||= to_sym.to_s.split("_").map(&:capitalize).join(" ").freeze
+      end
+
+      sig { returns(T::Boolean) }
+      def outdated_release?
+        self < MACOS_OLDEST_SUPPORTED
+      end
+
+      sig { returns(T::Boolean) }
+      def prerelease?
+        self >= MACOS_NEWEST_UNSUPPORTED
       end
 
       # For {OS::Mac::Version} compatibility.

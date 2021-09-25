@@ -48,7 +48,7 @@ By default this is omitted and the Homebrew default bottle URL root is used. Thi
 
 ### Cellar (`cellar`)
 Optionally contains the value of `HOMEBREW_CELLAR` in which the bottles were built.
-Most compiled software contains references to its compiled location so cannot be simply relocated anywhere on disk. If this value is `:any` or `:any_skip_relocation` this means that the bottle can be safely installed in any Cellar as it did not contain any references to its installation Cellar. This can be omitted if a bottle is compiled (as all default Homebrew ones are) for the default `HOMEBREW_CELLAR` of `/usr/local/Cellar`.
+Most compiled software contains references to its compiled location so cannot be simply relocated anywhere on disk. If this value is `:any` or `:any_skip_relocation` this means that the bottle can be safely installed in any Cellar as it did not contain any references to its installation Cellar. This can be omitted if a bottle is compiled (as all default Homebrew ones are) for the default `HOMEBREW_CELLAR`.
 
 ### Rebuild version (`rebuild`)
 Optionally contains the rebuild version of the bottle.
@@ -68,7 +68,13 @@ A full example:
 
 ```ruby
 pour_bottle? do
-  reason "The bottle needs the Xcode CLT to be installed."
-  satisfy { MacOS::CLT.installed? }
+  reason "The bottle needs to be installed into #{Homebrew::DEFAULT_PREFIX}."
+  satisfy { HOMEBREW_PREFIX.to_s == Homebrew::DEFAULT_PREFIX }
 end
+```
+
+Commonly used `pour_bottle?` conditions can be added as preset symbols to the `pour_bottle?` method, allowing them to be specified like this:
+
+```ruby
+pour_bottle? only_if: :clt_installed
 ```

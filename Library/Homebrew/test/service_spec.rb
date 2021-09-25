@@ -32,16 +32,53 @@ describe Homebrew::Service do
     end
   end
 
-  describe "#to_plist" do
-    it "returns valid plist" do
+  describe "#manual_command" do
+    it "returns valid manual_command" do
       f.class.service do
-        run [opt_bin/"beanstalkd", "test"]
+        run "#{HOMEBREW_PREFIX}/bin/beanstalkd"
+        run_type :immediate
+        environment_variables PATH: std_service_path_env, ETC_DIR: etc/"beanstalkd"
+        error_log_path var/"log/beanstalkd.error.log"
+        log_path var/"log/beanstalkd.log"
+        working_dir var
+        keep_alive true
+      end
+
+      path = f.service.manual_command
+      expect(path).to eq("ETC_DIR=\"#{HOMEBREW_PREFIX}/etc/beanstalkd\" #{HOMEBREW_PREFIX}/bin/beanstalkd")
+    end
+
+    it "returns valid manual_command without variables" do
+      f.class.service do
+        run opt_bin/"beanstalkd"
         run_type :immediate
         environment_variables PATH: std_service_path_env
         error_log_path var/"log/beanstalkd.error.log"
         log_path var/"log/beanstalkd.log"
         working_dir var
         keep_alive true
+      end
+
+      path = f.service.manual_command
+      expect(path).to eq("#{HOMEBREW_PREFIX}/opt/formula_name/bin/beanstalkd")
+    end
+  end
+
+  describe "#to_plist" do
+    it "returns valid plist" do
+      f.class.service do
+        run [opt_bin/"beanstalkd", "test"]
+        run_type :immediate
+        environment_variables PATH: std_service_path_env, FOO: "BAR", ETC_DIR: etc/"beanstalkd"
+        error_log_path var/"log/beanstalkd.error.log"
+        log_path var/"log/beanstalkd.log"
+        input_path var/"in/beanstalkd"
+        root_dir var
+        working_dir var
+        keep_alive true
+        process_type "interactive"
+        restart_delay 30
+        macos_legacy_timers true
       end
 
       plist = f.service.to_plist
@@ -52,6 +89,10 @@ describe Homebrew::Service do
         <dict>
         \t<key>EnvironmentVariables</key>
         \t<dict>
+        \t\t<key>ETC_DIR</key>
+        \t\t<string>#{HOMEBREW_PREFIX}/etc/beanstalkd</string>
+        \t\t<key>FOO</key>
+        \t\t<string>BAR</string>
         \t\t<key>PATH</key>
         \t\t<string>#{HOMEBREW_PREFIX}/bin:#{HOMEBREW_PREFIX}/sbin:/usr/bin:/bin:/usr/sbin:/sbin</string>
         \t</dict>
@@ -59,17 +100,27 @@ describe Homebrew::Service do
         \t<true/>
         \t<key>Label</key>
         \t<string>homebrew.mxcl.formula_name</string>
+        \t<key>LegacyTimers</key>
+        \t<true/>
+        \t<key>ProcessType</key>
+        \t<string>Interactive</string>
         \t<key>ProgramArguments</key>
         \t<array>
         \t\t<string>#{HOMEBREW_PREFIX}/opt/formula_name/bin/beanstalkd</string>
         \t\t<string>test</string>
         \t</array>
+        \t<key>RootDirectory</key>
+        \t<string>#{HOMEBREW_PREFIX}/var</string>
         \t<key>RunAtLoad</key>
         \t<true/>
         \t<key>StandardErrorPath</key>
         \t<string>#{HOMEBREW_PREFIX}/var/log/beanstalkd.error.log</string>
+        \t<key>StandardInPath</key>
+        \t<string>#{HOMEBREW_PREFIX}/var/in/beanstalkd</string>
         \t<key>StandardOutPath</key>
         \t<string>#{HOMEBREW_PREFIX}/var/log/beanstalkd.log</string>
+        \t<key>TimeOut</key>
+        \t<integer>30</integer>
         \t<key>WorkingDirectory</key>
         \t<string>#{HOMEBREW_PREFIX}/var</string>
         </dict>
@@ -110,11 +161,16 @@ describe Homebrew::Service do
       f.class.service do
         run [opt_bin/"beanstalkd", "test"]
         run_type :immediate
-        environment_variables PATH: std_service_path_env
+        environment_variables PATH: std_service_path_env, FOO: "BAR"
         error_log_path var/"log/beanstalkd.error.log"
         log_path var/"log/beanstalkd.log"
+        input_path var/"in/beanstalkd"
+        root_dir var
         working_dir var
         keep_alive true
+        process_type "interactive"
+        restart_delay 30
+        macos_legacy_timers true
       end
 
       unit = f.service.to_systemd_unit
@@ -123,14 +179,21 @@ describe Homebrew::Service do
         [Unit]
         Description=Homebrew generated unit for formula_name
 
+        [Install]
+        WantedBy=multi-user.target
+
         [Service]
         Type=simple
         ExecStart=#{HOMEBREW_PREFIX}/opt/#{name}/bin/beanstalkd test
         Restart=always
+        RestartSec=30
         WorkingDirectory=#{HOMEBREW_PREFIX}/var
+        RootDirectory=#{HOMEBREW_PREFIX}/var
+        StandardInput=file:#{HOMEBREW_PREFIX}/var/in/beanstalkd
         StandardOutput=append:#{HOMEBREW_PREFIX}/var/log/beanstalkd.log
         StandardError=append:#{HOMEBREW_PREFIX}/var/log/beanstalkd.error.log
         Environment=\"PATH=#{std_path}\"
+        Environment=\"FOO=BAR\"
       EOS
       expect(unit).to eq(unit_expect.strip)
     end
@@ -145,6 +208,9 @@ describe Homebrew::Service do
       unit_expect = <<~EOS
         [Unit]
         Description=Homebrew generated unit for formula_name
+
+        [Install]
+        WantedBy=multi-user.target
 
         [Service]
         Type=simple

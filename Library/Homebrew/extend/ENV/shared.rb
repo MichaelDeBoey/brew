@@ -50,6 +50,7 @@ module SharedEnvExtension
     reset
   end
   private :setup_build_environment
+  alias generic_shared_setup_build_environment setup_build_environment
 
   sig { void }
   def reset
@@ -237,19 +238,6 @@ module SharedEnvExtension
     end
   end
 
-  # Snow Leopard defines an NCURSES value the opposite of most distros.
-  # @see https://bugs.python.org/issue6848
-  sig { void }
-  def ncurses_define
-    odisabled "ENV.ncurses_define"
-  end
-
-  # @private
-  sig { void }
-  def userpaths!
-    odisabled "ENV.userpaths!"
-  end
-
   sig { void }
   def fortran
     # Ignore repeated calls to this function as it will misleadingly warn about
@@ -326,11 +314,6 @@ module SharedEnvExtension
 
   sig { void }
   def permit_arch_flags; end
-
-  sig { void }
-  def permit_weak_imports
-    odisabled "ENV.permit_weak_imports"
-  end
 
   # @private
   sig { params(cc: T.any(Symbol, String)).returns(T::Boolean) }

@@ -12,6 +12,28 @@ Homebrew is the easiest and most flexible way to install the UNIX tools Apple
 didn't include with macOS. It can also install software not packaged for your
 Linux distribution to your home directory without requiring `sudo`.
 
+## TERMINOLOGY
+
+**formula**: Homebrew package definition built from upstream sources
+
+**cask**: Homebrew package definition that installs macOS native applications
+
+**keg**: installation destination directory of a given **formula** version e.g. `/usr/local/Cellar/foo/0.1`
+
+**rack**: directory containing one or more versioned kegs e.g. `/usr/local/Cellar/foo`
+
+**keg-only**: a **formula** is **keg-only** if it is not symlinked into Homebrew's prefix (e.g. `/usr/local`)
+
+**cellar**: directory containing one or more named **racks** e.g. `/usr/local/Cellar`
+
+**Caskroom**: directory containing one or more named **casks** e.g. `/usr/local/Caskroom`
+
+**external command**: `brew` subcommand defined outside of the Homebrew/brew GitHub repository
+
+**tap**: directory (and usually Git repository) of **formulae**, **casks** and/or **external commands**
+
+**bottle**: pre-built **keg** poured into the **cellar**/**rack** instead of building from upstream sources
+
 ## ESSENTIAL COMMANDS
 
 For the full command list, see the [COMMANDS](#commands) section.
@@ -162,6 +184,18 @@ first search, making that search slower than subsequent ones.
 * `-d`, `--description`:
   Search just descriptions for *`text`*. If *`text`* is flanked by slashes, it is interpreted as a regular expression.
 
+### `developer` [*`subcommand`*]
+
+Control Homebrew's developer mode. When developer mode is enabled,
+`brew update` will update Homebrew to the latest commit on the `master`
+branch instead of the latest stable version along with some other behaviour changes.
+
+`brew developer` [`state`]
+<br>Display the current state of Homebrew's developer mode.
+
+`brew developer` (`on`|`off`)
+<br>Turn Homebrew's developer mode on or off respectively.
+
 ### `doctor`, `dr` [*`--list-checks`*] [*`--audit-debug`*] [*`diagnostic_check`* ...]
 
 Check your system for potential problems. Will exit with a non-zero status
@@ -180,6 +214,8 @@ an issue; just ignore this.
 Download a bottle (if available) or source packages for *`formula`*e
 and binaries for *`cask`*s. For files, also print SHA-256 checksums.
 
+* `--bottle-tag`:
+  Download a bottle for given tag.
 * `--HEAD`:
   Fetch HEAD version instead of stable version.
 * `-f`, `--force`:
@@ -287,7 +323,7 @@ the installed formulae or, every 30 days, for all formulae.
 * `--include-test`:
   Install testing dependencies required to run `brew test` *`formula`*.
 * `--HEAD`:
-  If *`formula`* defines it, install the HEAD version, aka. master, trunk, unstable.
+  If *`formula`* defines it, install the HEAD version, aka. main, trunk, unstable, master.
 * `--fetch-HEAD`:
   Fetch the upstream repository to detect if the HEAD installation of the formula is outdated. Otherwise, the repository's HEAD will only be checked for updates when a new stable or development version has been released.
 * `--keep-tmp`:
@@ -297,7 +333,7 @@ the installed formulae or, every 30 days, for all formulae.
 * `--bottle-arch`:
   Optimise bottles for the specified architecture rather than the oldest architecture supported by the version of macOS the bottles are built on.
 * `--display-times`:
-  Print install times for each formula at the end of the run.
+  Print install times for each package at the end of the run.
 * `-i`, `--interactive`:
   Download and patch *`formula`*, then open a shell. This allows the user to run `./configure --help` and otherwise determine how to turn the software package into a Homebrew package.
 * `-g`, `--git`:
@@ -313,9 +349,14 @@ the installed formulae or, every 30 days, for all formulae.
 * `--skip-cask-deps`:
   Skip installing cask dependencies.
 
-### `leaves`
+### `leaves` [*`--installed-on-request`*] [*`--installed-as-dependency`*]
 
 List installed formulae that are not dependencies of another installed formula.
+
+* `-r`, `--installed-on-request`:
+  Only list leaves that were manually installed.
+* `-p`, `--installed-as-dependency`:
+  Only list leaves that were installed as dependencies.
 
 ### `link`, `ln` [*`options`*] *`installed_formula`* [...]
 
@@ -329,6 +370,8 @@ installations.
   List files which would be linked or deleted by `brew link --overwrite` without actually linking or deleting any files.
 * `-f`, `--force`:
   Allow keg-only formulae to be linked.
+* `--HEAD`:
+  Link the HEAD version of the formula if it is installed.
 
 ### `list`, `ls` [*`options`*] [*`installed_formula`*|*`installed_cask`* ...]
 
@@ -374,13 +417,15 @@ if no formula is provided.
 * `-n`, `--max-count`:
   Print only a specified number of commits.
 
-### `migrate` [*`--force`*] *`installed_formula`* [...]
+### `migrate` [*`--force`*] [*`--dry-run`*] *`installed_formula`* [...]
 
 Migrate renamed packages to new names, where *`formula`* are old names of
 packages.
 
 * `-f`, `--force`:
   Treat installed *`formula`* and provided *`formula`* as if they are from the same taps and migrate them anyway.
+* `-n`, `--dry-run`:
+  Show what would be migrated, but do not actually migrate anything.
 
 ### `missing` [*`--hide`*`=`] [*`formula`* ...]
 
@@ -418,11 +463,15 @@ information is displayed in interactive shells, and suppressed otherwise.
 * `--cask`:
   List only outdated casks.
 * `--json`:
-  Print output in JSON format. There are two versions: `v1` and `v2`. `v1` is deprecated and is currently the default if no version is specified. `v2` prints outdated formulae and casks. 
+  Print output in JSON format. There are two versions: `v1` and `v2`. `v1` is deprecated and is currently the default if no version is specified. `v2` prints outdated formulae and casks.
 * `--fetch-HEAD`:
   Fetch the upstream repository to detect if the HEAD installation of the formula is outdated. Otherwise, the repository's HEAD will only be checked for updates when a new stable or development version has been released.
 * `--greedy`:
-  Print outdated casks with `auto_updates` or `version :latest`.
+  Print outdated casks with `auto_updates true` or `version :latest`.
+* `--greedy-latest`:
+  Print outdated casks including those with `version :latest`.
+* `--greedy-auto-updates`:
+  Print outdated casks including those with `auto_updates true`.
 
 ### `pin` *`installed_formula`* [...]
 
@@ -471,6 +520,8 @@ reinstalled formulae or, every 30 days, for all formulae.
   Retain the temporary files created during installation.
 * `--display-times`:
   Print install times for each formula at the end of the run.
+* `-g`, `--git`:
+  Create a Git repository, useful for creating patches to the software.
 * `--cask`:
   Treat all named arguments as casks.
 * `--[no-]binaries`:
@@ -482,7 +533,7 @@ reinstalled formulae or, every 30 days, for all formulae.
 * `--skip-cask-deps`:
   Skip installing cask dependencies.
 
-### `search`, `-S` [*`options`*] [*`text`*|`/`*`regex`*`/` ...]
+### `search`, `-S` [*`options`*] *`text`*|`/`*`regex`*`/` [...]
 
 Perform a substring search of cask tokens and formula names for *`text`*. If *`text`*
 is flanked by slashes, it is interpreted as a regular expression.
@@ -500,25 +551,28 @@ The search for *`text`* is extended online to `homebrew/core` and `homebrew/cask
   Search for only open GitHub pull requests.
 * `--closed`:
   Search for only closed GitHub pull requests.
+* `--repology`:
+  Search for *`text`* in the given database.
 * `--macports`:
-  Search for *`text`* in the given package manager's list.
+  Search for *`text`* in the given database.
 * `--fink`:
-  Search for *`text`* in the given package manager's list.
+  Search for *`text`* in the given database.
 * `--opensuse`:
-  Search for *`text`* in the given package manager's list.
+  Search for *`text`* in the given database.
 * `--fedora`:
-  Search for *`text`* in the given package manager's list.
+  Search for *`text`* in the given database.
 * `--debian`:
-  Search for *`text`* in the given package manager's list.
+  Search for *`text`* in the given database.
 * `--ubuntu`:
-  Search for *`text`* in the given package manager's list.
+  Search for *`text`* in the given database.
 
 ### `shellenv`
 
 Print export statements. When run in a shell, this installation of Homebrew will be added to your `PATH`, `MANPATH`, and `INFOPATH`.
 
 The variables `HOMEBREW_PREFIX`, `HOMEBREW_CELLAR` and `HOMEBREW_REPOSITORY` are also exported to avoid querying them multiple times.
-Consider adding evaluation of this command's output to your dotfiles (e.g. `~/.profile`, `~/.bash_profile`, or `~/.zprofile`) with: `eval $(brew shellenv)`
+The variable `HOMEBREW_SHELLENV_PREFIX` will be exported to avoid adding duplicate entries to the environment variables.
+Consider adding evaluation of this command's output to your dotfiles (e.g. `~/.profile`, `~/.bash_profile`, or `~/.zprofile`) with: `eval "$(brew shellenv)"`
 
 ### `tap` [*`options`*] [*`user`*`/`*`repo`*] [*`URL`*]
 
@@ -643,7 +697,7 @@ upgraded formulae or, every 30 days, for all formulae.
 * `--keep-tmp`:
   Retain the temporary files created during installation.
 * `--display-times`:
-  Print install times for each formula at the end of the run.
+  Print install times for each package at the end of the run.
 * `--cask`:
   Treat all named arguments as casks. If no named arguments are specified, upgrade only outdated casks.
 * `--[no-]binaries`:
@@ -656,6 +710,10 @@ upgraded formulae or, every 30 days, for all formulae.
   Skip installing cask dependencies.
 * `--greedy`:
   Also include casks with `auto_updates true` or `version :latest`.
+* `--greedy-latest`:
+  Also include casks with `version :latest`.
+* `--greedy-auto-updates`:
+  Also include casks with `auto_updates true`.
 
 ### `uses` [*`options`*] *`formula`* [...]
 
@@ -691,6 +749,10 @@ If *`formula`* is provided, display the file or directory used to cache *`formul
   Show the cache file used when building from source.
 * `--force-bottle`:
   Show the cache file used when pouring a bottle.
+* `--bottle-tag`:
+  Show the cache file used when pouring a bottle for the given tag.
+* `--HEAD`:
+  Show the cache file used when building from HEAD.
 * `--formula`:
   Only show cache files for formulae.
 * `--cask`:
@@ -935,13 +997,15 @@ nor vice versa. It must use whichever style specification the formula already us
 * `-f`, `--force`:
   Ignore duplicate open PRs. Remove all mirrors if `--mirror` was not specified.
 
-### `bump-revision` [*`--dry-run`*] [*`--message`*`=`] *`formula`* [...]
+### `bump-revision` [*`options`*] *`formula`* [...]
 
 Create a commit to increment the revision of *`formula`*. If no revision is
 present, "revision 1" will be added.
 
 * `-n`, `--dry-run`:
   Print what would be done rather than doing it.
+* `--write-only`:
+  Make the expected file modifications without taking any Git actions.
 * `--message`:
   Append *`message`* to the default commit message.
 
@@ -1027,9 +1091,13 @@ Build bottles for these formulae with GitHub Actions.
 * `--workflow`:
   Dispatch specified workflow (default: `dispatch-build-bottle.yml`).
 * `--upload`:
-  Upload built bottles to Bintray.
+  Upload built bottles.
 * `--linux`:
   Dispatch bottle for Linux (using GitHub runners).
+* `--linux-self-hosted`:
+  Dispatch bottle for Linux (using self-hosted runner).
+* `--linux-wheezy`:
+  Use Debian Wheezy container for building the bottle on Linux.
 
 ### `edit` [*`--formula`*] [*`--cask`*] [*`formula`*|*`cask`* ...]
 
@@ -1066,9 +1134,12 @@ Generate Homebrew's manpages and shell completions.
 * `--fail-if-not-changed`:
   Return a failing status code if no changes are detected in the manpage outputs. This can be used to notify CI when the manpages are out of date. Additionally, the date used in new manpages will match those in the existing manpages (to allow comparison without factoring in the date).
 
-### `install-bundler-gems`
+### `install-bundler-gems` [*`--groups`*`=`]
 
 Install Homebrew's Bundler gems.
+
+* `--groups`:
+  Installs the specified comma-separated list of gem groups (default: last used).
 
 ### `irb` [*`--examples`*] [*`--pry`*]
 
@@ -1091,7 +1162,7 @@ provided, check all kegs. Raises an error if run on uninstalled formulae.
 * `--cached`:
   Print the cached linkage values stored in `HOMEBREW_CACHE`, set by a previous `brew linkage` run.
 
-### `livecheck` [*`options`*] [*`formula`*|*`cask`* ...]
+### `livecheck`, `lc` [*`options`*] [*`formula`*|*`cask`* ...]
 
 Check for newer versions of formulae and/or casks from upstream.
 
@@ -1127,13 +1198,15 @@ Find pull requests that can be automatically merged using `brew pr-publish`.
 * `--with-label`:
   Pull requests must have this label.
 * `--without-labels`:
-  Pull requests must not have these labels (default: `do not merge`, `new formula`, `automerge-skip`, `linux-only`, `linux to homebrew-core`).
+  Pull requests must not have these labels (default: `do not merge`, `new formula`, `automerge-skip`, `linux to homebrew-core`).
 * `--without-approval`:
   Pull requests do not require approval to be merged.
 * `--publish`:
   Run `brew pr-publish` on matching pull requests.
 * `--autosquash`:
   Instruct `brew pr-publish` to automatically reformat and reword commits in the pull request to our preferred format.
+* `--no-autosquash`:
+  Instruct `brew pr-publish` to skip automatically reformatting and rewording commits in the pull request to the preferred format.
 * `--ignore-failures`:
   Include pull requests that have failing status checks.
 
@@ -1144,6 +1217,10 @@ Requires write access to the repository.
 
 * `--autosquash`:
   If supported on the target tap, automatically reformat and reword commits in the pull request to our preferred format.
+* `--no-autosquash`:
+  Skip automatically reformatting and rewording commits in the pull request to the preferred format, even if supported on the target tap.
+* `--branch`:
+  Branch to publish to (default: `master`).
 * `--message`:
   Message to include when autosquashing revision bumps, deletions, and rebuilds.
 * `--tap`:
@@ -1157,10 +1234,8 @@ Download and publish bottles, and apply the bottle commit from a
 pull request with artifacts generated by GitHub Actions.
 Requires write access to the repository.
 
-* `--no-publish`:
-  Download the bottles, apply the bottle commit and upload the bottles, but don't publish them.
 * `--no-upload`:
-  Download the bottles and apply the bottle commit, but don't upload.
+  Download the bottles but don't upload them.
 * `--no-commit`:
   Do not generate a new commit before uploading.
 * `-n`, `--dry-run`:
@@ -1185,16 +1260,12 @@ Requires write access to the repository.
   Download artifacts with the specified name (default: `bottles`).
 * `--archive-item`:
   Upload to the specified Internet Archive item (default: `homebrew`).
-* `--bintray-org`:
-  Upload to the specified Bintray organisation (default: `homebrew`).
 * `--tap`:
   Target tap repository (default: `homebrew/core`).
 * `--root-url`:
   Use the specified *`URL`* as the root of the bottle's URL instead of Homebrew's default.
 * `--root-url-using`:
   Use the specified download strategy class for downloading the bottle's URL instead of Homebrew's default.
-* `--bintray-mirror`:
-  Use the specified Bintray repository to automatically mirror stable URLs defined in the formulae (default: `mirror`).
 * `--workflows`:
   Retrieve artifacts from the specified workflow (default: `tests.yml`). Can be a comma-separated list to include multiple workflows.
 * `--ignore-missing-artifacts`:
@@ -1204,8 +1275,6 @@ Requires write access to the repository.
 
 Apply the bottle commit and publish bottles to a host.
 
-* `--no-publish`:
-  Apply the bottle commit and upload the bottles, but don't publish them.
 * `--keep-old`:
   If the formula specifies a rebuild version, attempt to preserve its value in the generated DSL.
 * `-n`, `--dry-run`:
@@ -1218,8 +1287,6 @@ Apply the bottle commit and publish bottles to a host.
   Specify a committer name and email in `git`'s standard author format.
 * `--archive-item`:
   Upload to the specified Internet Archive item (default: `homebrew`).
-* `--bintray-org`:
-  Upload to the specified Bintray organisation (default: `homebrew`).
 * `--github-org`:
   Upload to the specified GitHub organisation's GitHub Packages (default: `homebrew`).
 * `--root-url`:
@@ -1354,8 +1421,6 @@ Run Homebrew's unit and integration tests.
 ### `typecheck`, `tc` [*`options`*]
 
 Check for typechecking errors using Sorbet.
-
-Not (yet) working on Apple Silicon.
 
 * `--fix`:
   Automatically fix type errors.
@@ -1658,6 +1723,8 @@ Otherwise, operate on `~/Library/LaunchAgents` (started at login).
 [`sudo`] `brew services cleanup`
 <br>Remove all unused services.
 
+* `--file`:
+  Use the plist file from this location to start or run the service.
 * `--all`:
   Run *`subcommand`* on all services.
 
@@ -1675,6 +1742,10 @@ Only supports GitHub Actions as a CI provider. This is because Homebrew uses Git
   Don't check if the local system is set up correctly.
 * `--build-from-source`:
   Build from source rather than building bottles.
+* `--build-dependents-from-source`:
+  Build dependents from source rather than testing bottles.
+* `--junit`:
+  generate a JUnit XML test results file.
 * `--keep-old`:
   Run `brew bottle --keep-old` to build new bottles for a single platform.
 * `--skip-relocation`:
@@ -1691,20 +1762,22 @@ Only supports GitHub Actions as a CI provider. This is because Homebrew uses Git
   Print test step output in real time. Has the side effect of passing output as raw bytes instead of re-encoding in UTF-8.
 * `--test-default-formula`:
   Use a default testing formula when not building a tap and no other formulae are specified.
-* `--bintray-org`:
-  Upload bottles to the given Bintray organisation.
 * `--root-url`:
   Use the specified *`URL`* as the root of the bottle's URL instead of Homebrew's default.
 * `--git-name`:
   Set the Git author/committer names to the given name.
 * `--git-email`:
   Set the Git author/committer email to the given email.
-* `--ci-upload`:
-  Use the Homebrew CI bottle upload options.
 * `--publish`:
   Publish the uploaded bottles.
+* `--skip-dependents`:
+  Don't test any dependents.
 * `--skip-recursive-dependents`:
   Only test the direct dependents.
+* `--skip-unbottled-arm`:
+  Only test bottled formulae on Apple Silicon.
+* `--skip-unbottled-linux`:
+  Only test bottled formulae on Linux.
 * `--only-cleanup-before`:
   Only run the pre-cleanup step. Needs `--cleanup`.
 * `--only-setup`:
@@ -1713,8 +1786,20 @@ Only supports GitHub Actions as a CI provider. This is because Homebrew uses Git
   Only run the tap syntax check step.
 * `--only-formulae`:
   Only run the formulae steps.
+* `--only-formulae-detect`:
+  Only run the formulae detection steps.
+* `--only-formulae-dependents`:
+  Only run the formulae dependents steps.
 * `--only-cleanup-after`:
   Only run the post-cleanup step. Needs `--cleanup`.
+* `--testing-formulae`:
+  Use these testing formulae rather than running the formulae detection steps.
+* `--added-formulae`:
+  Use these added formulae rather than running the formulae detection steps.
+* `--deleted-formulae`:
+  Use these deleted formulae rather than running the formulae detection steps.
+* `--skipped-or-failed-formulae`:
+  Use these skipped or failed formulae from formulae steps for a formulae dependents step.
 
 ### `unalias` *`alias`* [...]
 
@@ -1803,13 +1888,7 @@ example, run `export HOMEBREW_NO_INSECURE_REDIRECT=1` rather than just
 - `HOMEBREW_BAT_CONFIG_PATH`
   <br>Use this as the `bat` configuration file.
 
-  *Default:* `$HOME/.bat/config`.
-
-- `HOMEBREW_BINTRAY_KEY`
-  <br>Use this API key when accessing the Bintray API (where bottles are stored).
-
-- `HOMEBREW_BINTRAY_USER`
-  <br>Use this username when accessing the Bintray API (where bottles are stored).
+  *Default:* `$HOME/.config/bat/config`.
 
 - `HOMEBREW_BOOTSNAP`
   <br>If set, use Bootsnap to speed up repeated `brew` calls. A no-op when using Homebrew's vendored, relocatable Ruby on macOS (as it doesn't work).
@@ -1917,6 +1996,9 @@ example, run `export HOMEBREW_NO_INSECURE_REDIRECT=1` rather than just
 - `HOMEBREW_GITHUB_PACKAGES_TOKEN`
   <br>Use this GitHub personal access token when accessing the GitHub Packages Registry (where bottles may be stored).
 
+- `HOMEBREW_DOCKER_REGISTRY_TOKEN`
+  <br>Use this bearer token for authenticating with a Docker registry proxying GitHub Packages.
+
 - `HOMEBREW_GITHUB_PACKAGES_USER`
   <br>Use this username when accessing the GitHub Packages Registry (where bottles may be stored).
 
@@ -1961,6 +2043,9 @@ example, run `export HOMEBREW_NO_INSECURE_REDIRECT=1` rather than just
 - `HOMEBREW_NO_INSTALLED_DEPENDENTS_CHECK`
   <br>If set, do not check for broken dependents after installing, upgrading or reinstalling formulae.
 
+- `HOMEBREW_NO_CLEANUP_FORMULAE`
+  <br>A comma-separated list of formulae. Homebrew will refuse to clean up a formula if it appears on this list.
+
 - `HOMEBREW_NO_COLOR`
   <br>If set, do not print text with colour added.
 
@@ -1985,11 +2070,17 @@ example, run `export HOMEBREW_NO_INSECURE_REDIRECT=1` rather than just
 - `HOMEBREW_NO_INSTALL_CLEANUP`
   <br>If set, `brew install`, `brew upgrade` and `brew reinstall` will never automatically cleanup installed/upgraded/reinstalled formulae or all formulae every `HOMEBREW_CLEANUP_PERIODIC_FULL_DAYS` days.
 
+- `HOMEBREW_NO_INSTALL_UPGRADE`
+  <br>If set, `brew install` will not automatically upgrade installed but outdated formulae
+
 - `HOMEBREW_PRY`
   <br>If set, use Pry for the `brew irb` command.
 
 - `HOMEBREW_SIMULATE_MACOS_ON_LINUX`
   <br>If set, running Homebrew on Linux will simulate certain macOS code paths. This is useful when auditing macOS formulae while on Linux. Implies `HOMEBREW_FORCE_HOMEBREW_ON_LINUX`.
+
+- `HOMEBREW_FORCE_HOMEBREW_CORE_REPO_ON_LINUX`
+  <br>If set, running Homebrew on Linux will use homebrew-core instead of linuxbrew-core.
 
 - `HOMEBREW_SKIP_OR_LATER_BOTTLES`
   <br>If set along with `HOMEBREW_DEVELOPER`, do not use bottles from older versions of macOS. This is useful in development on new macOS versions.
@@ -2073,7 +2164,7 @@ Homebrew's Technical Steering Committee is Bo Anderson, FX Coudert, Michka Popof
 
 Homebrew's Linux maintainers are Daniel Nachun, Dawid Dziurla, Issy Long, Jonathan Chang, Michka Popoff and Shaun Jackman.
 
-Homebrew's other current maintainers are Alexander Bayandin, Caleb Xu, Carlo Cabrera, Claudia Pellegrino, Dustin Rodrigues, Eric Knibbe, Maxim Belkin, Miccal Matthews, Nanda H Krishna, Randall, Sam Ford, Steve Peters, Thierry Moisan, Tom Schoonjans, Vítor Galvão and rui.
+Homebrew's other current maintainers are Alexander Bayandin, Bevan Kay, Branch Vincent, Caleb Xu, Carlo Cabrera, Claudia Pellegrino, Connor Mann, Dustin Rodrigues, Eric Knibbe, Maxim Belkin, Miccal Matthews, Michael Cho, Nanda H Krishna, Randall, Sam Ford, Steve Peters, Thierry Moisan, Tom Schoonjans, Vítor Galvão and rui.
 
 Former maintainers with significant contributions include Jan Viljanen, JCount, commitay, Dominyk Tiller, Tim Smith, Baptiste Fontaine, Xu Cheng, Martin Afanasjew, Brett Koonce, Charlie Sharpsteen, Jack Nagel, Adam Vandenberg, Andrew Janke, Alex Dunn, neutric, Tomasz Pajor, Uladzislau Shablinski, Alyssa Ross, ilovezfs, Chongyu Zhu and Homebrew's creator: Max Howell.
 
@@ -2092,6 +2183,7 @@ See our issues on GitHub:
 
 [SYNOPSIS]: #SYNOPSIS "SYNOPSIS"
 [DESCRIPTION]: #DESCRIPTION "DESCRIPTION"
+[TERMINOLOGY]: #TERMINOLOGY "TERMINOLOGY"
 [ESSENTIAL COMMANDS]: #ESSENTIAL-COMMANDS "ESSENTIAL COMMANDS"
 [COMMANDS]: #COMMANDS "COMMANDS"
 [DEVELOPER COMMANDS]: #DEVELOPER-COMMANDS "DEVELOPER COMMANDS"

@@ -15,7 +15,8 @@ module Homebrew
   extend Search
 
   PACKAGE_MANAGERS = {
-    macports: ->(query) { "https://www.macports.org/ports.php?by=name&substr=#{query}" },
+    repology: ->(query) { "https://repology.org/projects/?search=#{query}" },
+    macports: ->(query) { "https://ports.macports.org/search/?q=#{query}" },
     fink:     ->(query) { "https://pdb.finkproject.org/pdb/browse.php?summary=#{query}" },
     opensuse: ->(query) { "https://software.opensuse.org/search?q=#{query}" },
     fedora:   ->(query) { "https://apps.fedoraproject.org/packages/s/#{query}" },
@@ -53,15 +54,14 @@ module Homebrew
       package_manager_switches = PACKAGE_MANAGERS.keys.map { |name| "--#{name}" }
       package_manager_switches.each do |s|
         switch s,
-               description: "Search for <text> in the given package manager's list."
+               description: "Search for <text> in the given database."
       end
 
       conflicts "--desc", "--pull-request"
       conflicts "--open", "--closed"
       conflicts(*package_manager_switches)
 
-      # TODO: (3.2) Add `min: 1` the `named_args` once `brew search --cask` is removed
-      named_args :text_or_regex
+      named_args :text_or_regex, min: 1
     end
   end
 
@@ -74,17 +74,11 @@ module Homebrew
       return
     end
 
-    if args.no_named?
-      odisabled "`brew search --cask` with no arguments to output casks", "`brew casks`" if args.cask?
-
-      raise UsageError, "This command requires at least 1 text or regex argument."
-    end
-
     query = args.named.join(" ")
     string_or_regex = query_regexp(query)
 
     if args.desc?
-      search_descriptions(string_or_regex)
+      search_descriptions(string_or_regex, args)
     elsif args.pull_request?
       only = if args.open? && !args.closed?
         "open"

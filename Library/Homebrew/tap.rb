@@ -127,6 +127,7 @@ class Tap
     @style_exceptions = nil
     @pypi_formula_mappings = nil
     @config = nil
+    @spell_checker = nil
     remove_instance_variable(:@private) if instance_variable_defined?(:@private)
   end
 
@@ -244,9 +245,8 @@ class Tap
   # @param clone_target [String] If passed, it will be used as the clone remote.
   # @param force_auto_update [Boolean, nil] If present, whether to override the
   #   logic that skips non-GitHub repositories during auto-updates.
-  # @param full_clone [Boolean] If set as true, full clone will be used. If unset/nil, means "no change".
   # @param quiet [Boolean] If set, suppress all output.
-  def install(full_clone: true, quiet: false, clone_target: nil, force_auto_update: nil)
+  def install(quiet: false, clone_target: nil, force_auto_update: nil)
     require "descriptions"
     require "readall"
 
@@ -270,11 +270,13 @@ class Tap
     if installed?
       unless force_auto_update.nil?
         config["forceautoupdate"] = force_auto_update
-        return if !full_clone || !shallow?
+        return
       end
 
-      $stderr.ohai "Unshallowing #{name}" unless quiet
-      args = %w[fetch --unshallow]
+      $stderr.ohai "Unshallowing #{name}" if shallow? && !quiet
+      args = %w[fetch]
+      # Git throws an error when attempting to unshallow a full clone
+      args << "--unshallow" if shallow?
       args << "-q" if quiet
       path.cd { safe_system "git", *args }
       return
@@ -288,8 +290,10 @@ class Tap
     # Override possible user configs like:
     #   git config --global clone.defaultRemoteName notorigin
     args << "--origin=origin"
-    args << "--depth=1" unless full_clone
     args << "-q" if quiet
+
+    # Override user-set default template
+    args << "--template="
 
     begin
       safe_system "git", *args
@@ -731,25 +735,26 @@ class CoreTap < Tap
 
   def self.ensure_installed!
     return if instance.installed?
+    return if ENV["HOMEBREW_INSTALL_FROM_API"].present?
 
     safe_system HOMEBREW_BREW_FILE, "tap", instance.name
   end
 
   # CoreTap never allows shallow clones (on request from GitHub).
-  def install(full_clone: true, quiet: false, clone_target: nil, force_auto_update: nil)
-    raise "Shallow clones are not supported for homebrew-core!" unless full_clone
-
+  def install(quiet: false, clone_target: nil, force_auto_update: nil)
     remote = Homebrew::EnvConfig.core_git_remote
     if remote != default_remote
       $stderr.puts "HOMEBREW_CORE_GIT_REMOTE set: using #{remote} for Homebrew/core Git remote URL."
     end
-    super(full_clone: full_clone, quiet: quiet, clone_target: remote, force_auto_update: force_auto_update)
+    super(quiet: quiet, clone_target: remote, force_auto_update: force_auto_update)
   end
 
   # @private
-  sig { void }
-  def uninstall
-    raise "Tap#uninstall is not available for CoreTap"
+  sig { params(manual: T::Boolean).void }
+  def uninstall(manual: false)
+    raise "Tap#uninstall is not available for CoreTap" if ENV["HOMEBREW_INSTALL_FROM_API"].blank?
+
+    super
   end
 
   # @private

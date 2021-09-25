@@ -29,6 +29,13 @@ module Superenv
     base.run_time_deps = []
   end
 
+  # The location of Homebrew's shims on this OS.
+  # @public
+  sig { returns(Pathname) }
+  def self.shims_path
+    HOMEBREW_SHIMS_PATH/"super"
+  end
+
   # @private
   sig { returns(T.nilable(Pathname)) }
   def self.bin; end
@@ -91,10 +98,11 @@ module Superenv
     # g - Enable "-stdlib=libc++" for clang.
     # h - Enable "-stdlib=libstdc++" for clang.
     # K - Don't strip -arch <arch>, -m32, or -m64
+    # d - Don't strip -march=<target>. Use only in formulae that
+    #     have runtime detection of CPU features.
     # w - Pass -no_weak_imports to the linker
     #
     # These flags will also be present:
-    # s - apply fix for sed's Unicode support
     # a - apply fix for apr-1-config path
   end
   alias generic_setup_build_environment setup_build_environment
@@ -199,10 +207,23 @@ module Superenv
 
   sig { returns(T.nilable(PATH)) }
   def determine_library_paths
-    paths = [
-      keg_only_deps.map(&:opt_lib),
-      HOMEBREW_PREFIX/"lib",
-    ]
+    paths = []
+    if compiler.match?(GNU_GCC_REGEXP)
+      # Add path to GCC runtime libs for version being used to compile,
+      # so that the linker will find those libs before any that may be linked in $HOMEBREW_PREFIX/lib.
+      # https://github.com/Homebrew/brew/pull/11459#issuecomment-851075936
+      begin
+        f = gcc_version_formula(compiler.to_s)
+      rescue FormulaUnavailableError
+        nil
+      else
+        paths << f.opt_lib/"gcc"/f.version.major if f.any_version_installed?
+      end
+    end
+
+    paths << keg_only_deps.map(&:opt_lib)
+    paths << HOMEBREW_PREFIX/"lib"
+
     paths += homebrew_extra_library_paths
     PATH.new(paths).existing
   end
@@ -261,6 +282,9 @@ module Superenv
   sig { returns(String) }
   def determine_optflags
     Hardware::CPU.optimization_flags.fetch(effective_arch)
+  rescue KeyError
+    odebug "Building a bottle for custom architecture (#{effective_arch})..."
+    Hardware::CPU.arch_flag(effective_arch)
   end
 
   sig { returns(String) }
@@ -299,6 +323,11 @@ module Superenv
   end
 
   sig { void }
+  def runtime_cpu_detection
+    append_to_cccfg "d"
+  end
+
+  sig { void }
   def cxx11
     append_to_cccfg "x"
     append_to_cccfg "g" if homebrew_cc == "clang"
@@ -315,11 +344,26 @@ module Superenv
     append_to_cccfg "O"
   end
 
-  %w[O1 O0].each do |opt|
-    define_method opt do
-      send(:[]=, "HOMEBREW_OPTIMIZATION_LEVEL", opt)
+  # rubocop: disable Naming/MethodName
+  # Fixes style error `Naming/MethodName: Use snake_case for method names.`
+  sig { params(block: T.nilable(T.proc.void)).void }
+  def O0(&block)
+    if block
+      with_env(HOMEBREW_OPTIMIZATION_LEVEL: "O0", &block)
+    else
+      self["HOMEBREW_OPTIMIZATION_LEVEL"] = "O0"
     end
   end
+
+  sig { params(block: T.nilable(T.proc.void)).void }
+  def O1(&block)
+    if block
+      with_env(HOMEBREW_OPTIMIZATION_LEVEL: "O1", &block)
+    else
+      self["HOMEBREW_OPTIMIZATION_LEVEL"] = "O1"
+    end
+  end
+  # rubocop: enable Naming/MethodName
 end
 
 require "extend/os/extend/ENV/super"

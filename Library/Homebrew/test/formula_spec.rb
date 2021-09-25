@@ -28,7 +28,7 @@ describe Formula do
     let(:path) { Formulary.core_path(name) }
     let(:spec) { :stable }
     let(:alias_name) { "baz@1" }
-    let(:alias_path) { CoreTap.instance.alias_dir/alias_name }
+    let(:alias_path) { (CoreTap.instance.alias_dir/alias_name).to_s }
     let(:f) { klass.new(name, path, spec) }
     let(:f_alias) { klass.new(name, path, spec, alias_path: alias_path) }
 
@@ -41,6 +41,7 @@ describe Formula do
       expect(f.alias_path).to be nil
       expect(f.alias_name).to be nil
       expect(f.full_alias_name).to be nil
+      expect(f.specified_path).to eq(path)
       expect { klass.new }.to raise_error(ArgumentError)
     end
 
@@ -51,6 +52,7 @@ describe Formula do
       expect(f_alias.alias_path).to eq(alias_path)
       expect(f_alias.alias_name).to eq(alias_name)
       expect(f_alias.specified_name).to eq(alias_name)
+      expect(f_alias.specified_path).to eq(Pathname(alias_path))
       expect(f_alias.full_alias_name).to eq(alias_name)
       expect(f_alias.full_specified_name).to eq(alias_name)
       expect { klass.new }.to raise_error(ArgumentError)
@@ -71,6 +73,7 @@ describe Formula do
         expect(f.alias_path).to be nil
         expect(f.alias_name).to be nil
         expect(f.full_alias_name).to be nil
+        expect(f.specified_path).to eq(path)
         expect { klass.new }.to raise_error(ArgumentError)
       end
 
@@ -81,6 +84,7 @@ describe Formula do
         expect(f_alias.alias_path).to eq(alias_path)
         expect(f_alias.alias_name).to eq(alias_name)
         expect(f_alias.specified_name).to eq(alias_name)
+        expect(f_alias.specified_path).to eq(Pathname(alias_path))
         expect(f_alias.full_alias_name).to eq(full_alias_name)
         expect(f_alias.full_specified_name).to eq(full_alias_name)
         expect { klass.new }.to raise_error(ArgumentError)
@@ -701,31 +705,52 @@ describe Formula do
     end
   end
 
-  specify "#service" do
-    f = formula do
-      url "https://brew.sh/test-1.0.tbz"
-    end
-
-    f.class.service do
-      run [opt_bin/"beanstalkd"]
-      run_type :immediate
-      error_log_path var/"log/beanstalkd.error.log"
-      log_path var/"log/beanstalkd.log"
-      working_dir var
-      keep_alive true
-    end
-    expect(f.service).not_to eq(nil)
-  end
-
-  specify "service uses simple run" do
-    f = formula do
-      url "https://brew.sh/test-1.0.tbz"
-      service do
-        run opt_bin/"beanstalkd"
+  describe "#service" do
+    specify "no service defined" do
+      f = formula do
+        url "https://brew.sh/test-1.0.tbz"
       end
+
+      expect(f.service).to eq(nil)
     end
 
-    expect(f.service).not_to eq(nil)
+    specify "service complicated" do
+      f = formula do
+        url "https://brew.sh/test-1.0.tbz"
+      end
+
+      f.class.service do
+        run [opt_bin/"beanstalkd"]
+        run_type :immediate
+        error_log_path var/"log/beanstalkd.error.log"
+        log_path var/"log/beanstalkd.log"
+        working_dir var
+        keep_alive true
+      end
+      expect(f.service).not_to eq(nil)
+    end
+
+    specify "service uses simple run" do
+      f = formula do
+        url "https://brew.sh/test-1.0.tbz"
+        service do
+          run opt_bin/"beanstalkd"
+        end
+      end
+
+      expect(f.service).not_to eq(nil)
+    end
+
+    specify "service helpers return data" do
+      f = formula do
+        url "https://brew.sh/test-1.0.tbz"
+      end
+
+      expect(f.plist_name).to eq("homebrew.mxcl.formula_name")
+      expect(f.service_name).to eq("homebrew.formula_name")
+      expect(f.plist_path).to eq(HOMEBREW_PREFIX/"opt/formula_name/homebrew.mxcl.formula_name.plist")
+      expect(f.systemd_service_path).to eq(HOMEBREW_PREFIX/"opt/formula_name/homebrew.formula_name.service")
+    end
   end
 
   specify "dependencies" do
@@ -871,6 +896,25 @@ describe Formula do
     expect(h["versions"]["bottle"]).to be_truthy
   end
 
+  specify "#to_recursive_bottle_hash" do
+    f1 = formula "foo" do
+      url "foo-1.0"
+
+      bottle do
+        sha256 cellar: :any, Utils::Bottles.tag.to_sym => TEST_SHA256
+        sha256 cellar: :any, foo:                         TEST_SHA256
+      end
+    end
+
+    h = f1.to_recursive_bottle_hash
+
+    expect(h).to be_a(Hash)
+    expect(h["name"]).to eq "foo"
+    expect(h["bottles"].keys).to eq [Utils::Bottles.tag.to_s, "x86_64_foo"]
+    expect(h["bottles"][Utils::Bottles.tag.to_s].keys).to eq ["url"]
+    expect(h["dependencies"]).to eq []
+  end
+
   describe "#eligible_kegs_for_cleanup" do
     it "returns Kegs eligible for cleanup" do
       f1 = Class.new(Testball) do
@@ -928,20 +972,17 @@ describe Formula do
         head("foo")
       end
 
-      stable_prefix = f.latest_installed_prefix
-      stable_prefix.mkpath
-
-      [["000000_1", 1], ["111111", 2], ["111111_1", 2]].each do |pkg_version_suffix, stamp|
-        prefix = f.prefix("HEAD-#{pkg_version_suffix}")
+      ["0.0.1", "0.0.2", "0.1", "HEAD-000000", "HEAD-111111", "HEAD-111111_1"].each do |version|
+        prefix = f.prefix(version)
         prefix.mkpath
         tab = Tab.empty
         tab.tabfile = prefix/Tab::FILENAME
-        tab.source_modified_time = stamp
+        tab.source_modified_time = 1
         tab.write
       end
 
-      eligible_kegs = f.installed_kegs - [Keg.new(f.prefix("HEAD-111111_1"))]
-      expect(f.eligible_kegs_for_cleanup).to eq(eligible_kegs)
+      eligible_kegs = f.installed_kegs - [Keg.new(f.prefix("HEAD-111111_1")), Keg.new(f.prefix("0.1"))]
+      expect(f.eligible_kegs_for_cleanup.sort_by(&:version)).to eq(eligible_kegs.sort_by(&:version))
     end
   end
 
@@ -994,6 +1035,65 @@ describe Formula do
       end
 
       expect(f).to pour_bottle
+    end
+
+    it "returns false with `only_if: :clt_installed` on macOS", :needs_macos do
+      # Pretend CLT is not installed
+      allow(MacOS::CLT).to receive(:installed?).and_return(false)
+
+      f = formula "foo" do
+        url "foo-1.0"
+
+        pour_bottle? only_if: :clt_installed
+      end
+
+      expect(f).not_to pour_bottle
+    end
+
+    it "returns true with `only_if: :clt_installed` on macOS", :needs_macos do
+      # Pretend CLT is installed
+      allow(MacOS::CLT).to receive(:installed?).and_return(true)
+
+      f = formula "foo" do
+        url "foo-1.0"
+
+        pour_bottle? only_if: :clt_installed
+      end
+
+      expect(f).to pour_bottle
+    end
+
+    it "returns true with `only_if: :clt_installed` on Linux", :needs_linux do
+      f = formula "foo" do
+        url "foo-1.0"
+
+        pour_bottle? only_if: :clt_installed
+      end
+
+      expect(f).to pour_bottle
+    end
+
+    it "throws an error if passed both a symbol and a block" do
+      expect do
+        formula "foo" do
+          url "foo-1.0"
+
+          pour_bottle? only_if: :clt_installed do
+            reason "true reason"
+            satisfy { true }
+          end
+        end
+      end.to raise_error(ArgumentError, "Do not pass both a preset condition and a block to `pour_bottle?`")
+    end
+
+    it "throws an error if passed an invalid symbol" do
+      expect do
+        formula "foo" do
+          url "foo-1.0"
+
+          pour_bottle? only_if: :foo
+        end
+      end.to raise_error(ArgumentError, "Invalid preset `pour_bottle?` condition")
     end
   end
 

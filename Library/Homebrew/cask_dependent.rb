@@ -15,8 +15,11 @@ class CaskDependent
     @cask.full_name
   end
 
-  def runtime_dependencies
-    recursive_dependencies
+  def runtime_dependencies(ignore_missing: false)
+    recursive_dependencies(ignore_missing: ignore_missing).reject do |dependency|
+      tags = dependency.tags
+      tags.include?(:build) || tags.include?(:test)
+    end
   end
 
   def deps
@@ -43,8 +46,8 @@ class CaskDependent
     end
   end
 
-  def recursive_dependencies(&block)
-    Dependency.expand(self, &block)
+  def recursive_dependencies(ignore_missing: false, &block)
+    Dependency.expand(self, ignore_missing: ignore_missing, &block)
   end
 
   def recursive_requirements(&block)

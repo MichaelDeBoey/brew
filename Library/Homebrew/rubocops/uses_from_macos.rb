@@ -77,14 +77,13 @@ module RuboCop
           bash
           cpio
           expect
+          git
           groff
           gzip
           openssl
-          openssl@1.1
           perl
           php
           python
-          python@3
           rsync
           vim
           xz

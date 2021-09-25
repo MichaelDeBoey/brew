@@ -11,7 +11,10 @@ module Utils
     class << self
       extend T::Sig
 
-      def tag
+      # Gets the tag for the running OS.
+      def tag(symbol = nil)
+        return Tag.from_symbol(symbol) if symbol.present?
+
         @tag ||= Tag.new(system: T.must(ENV["HOMEBREW_SYSTEM"]).downcase.to_sym,
                          arch:   T.must(ENV["HOMEBREW_PROCESSOR"]).downcase.to_sym)
       end
@@ -92,6 +95,23 @@ module Utils
         end
       end
 
+      def load_tab(formula)
+        keg = Keg.new(formula.prefix)
+        tabfile = keg/Tab::FILENAME
+        bottle_json_path = formula.local_bottle_path&.sub(/\.tar\.gz$/, ".json")
+
+        if (tab_attributes = formula.bottle_tab_attributes.presence)
+          Tab.from_file_content(tab_attributes.to_json, tabfile)
+        elsif !tabfile.exist? && bottle_json_path&.exist?
+          _, tag, = Utils::Bottles.extname_tag_rebuild(formula.local_bottle_path)
+          bottle_hash = JSON.parse(File.read(bottle_json_path))
+          tab_json = bottle_hash[formula.full_name]["bottle"]["tags"][tag]["tab"].to_json
+          Tab.from_file_content(tab_json, tabfile)
+        else
+          Tab.for_keg(keg)
+        end
+      end
+
       private
 
       def bottle_file_list(bottle_file)
@@ -139,6 +159,14 @@ module Utils
         else
           self.class == other.class && system == other.system && arch == other.arch
         end
+      end
+
+      def eql?(other)
+        self.class == other.class && self == other
+      end
+
+      def hash
+        [system, arch].hash
       end
 
       sig { returns(Symbol) }
@@ -198,21 +226,23 @@ module Utils
       end
     end
 
-    # Helper functions for bottles hosted on Bintray.
-    module Bintray
-      def self.package(formula_name)
-        package_name = formula_name.to_s.dup
-        package_name.tr!("+", "x")
-        package_name.sub!(/(.)@(\d)/, "\\1:\\2") # Handle foo@1.2 style formulae.
-        package_name
-      end
+    # The specification for a specific tag
+    class TagSpecification
+      extend T::Sig
 
-      def self.repository(tap = nil)
-        if tap.nil? || tap.core_tap?
-          "bottles"
-        else
-          "bottles-#{tap.repo}"
-        end
+      sig { returns(Utils::Bottles::Tag) }
+      attr_reader :tag
+
+      sig { returns(Checksum) }
+      attr_reader :checksum
+
+      sig { returns(T.any(Symbol, String)) }
+      attr_reader :cellar
+
+      def initialize(tag:, checksum:, cellar:)
+        @tag = tag
+        @checksum = checksum
+        @cellar = cellar
       end
     end
 
@@ -220,36 +250,50 @@ module Utils
     class Collector
       extend T::Sig
 
-      extend Forwardable
-
-      def_delegators :@checksums, :keys, :[], :[]=, :key?, :each_key, :dig
-
       sig { void }
       def initialize
-        @checksums = {}
+        @tag_specs = T.let({}, T::Hash[Utils::Bottles::Tag, Utils::Bottles::TagSpecification])
+      end
+
+      sig { returns(T::Array[Utils::Bottles::Tag]) }
+      def tags
+        @tag_specs.keys
+      end
+
+      sig { params(tag: Utils::Bottles::Tag, checksum: Checksum, cellar: T.any(Symbol, String)).void }
+      def add(tag, checksum:, cellar:)
+        spec = Utils::Bottles::TagSpecification.new(tag: tag, checksum: checksum, cellar: cellar)
+        @tag_specs[tag] = spec
+      end
+
+      sig { params(tag: Utils::Bottles::Tag, no_older_versions: T::Boolean).returns(T::Boolean) }
+      def tag?(tag, no_older_versions: false)
+        tag = find_matching_tag(tag, no_older_versions: no_older_versions)
+        tag.present?
+      end
+
+      sig { params(block: T.proc.params(tag: Utils::Bottles::Tag).void).void }
+      def each_tag(&block)
+        @tag_specs.each_key(&block)
       end
 
       sig {
-        params(
-          tag:               T.any(Symbol, Utils::Bottles::Tag),
-          no_older_versions: T::Boolean,
-        ).returns(
-          T.nilable([Checksum, Symbol, T.any(Symbol, String)]),
-        )
+        params(tag: Utils::Bottles::Tag, no_older_versions: T::Boolean)
+          .returns(T.nilable(Utils::Bottles::TagSpecification))
       }
-      def fetch_checksum_for(tag, no_older_versions: false)
-        tag = Utils::Bottles::Tag.from_symbol(tag) if tag.is_a?(Symbol)
-        tag = find_matching_tag(tag, no_older_versions: no_older_versions)&.to_sym
-        return self[tag][:checksum], tag, self[tag][:cellar] if tag
+      def specification_for(tag, no_older_versions: false)
+        tag = find_matching_tag(tag, no_older_versions: no_older_versions)
+        @tag_specs[tag] if tag
       end
 
       private
 
       def find_matching_tag(tag, no_older_versions: false)
-        if key?(tag.to_sym)
+        if @tag_specs.key?(tag)
           tag
-        elsif key?(:all)
-          Tag.from_symbol(:all)
+        else
+          all = Tag.from_symbol(:all)
+          all if @tag_specs.key?(all)
         end
       end
     end

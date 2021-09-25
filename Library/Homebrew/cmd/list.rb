@@ -90,7 +90,7 @@ module Homebrew
       unless args.cask?
         formula_names = args.no_named? ? Formula.installed : args.named.to_resolved_formulae
         full_formula_names = formula_names.map(&:full_name).sort(&tap_and_name_comparison)
-        full_formula_names = Formatter.columns(full_formula_names) unless args.public_send(:'1?')
+        full_formula_names = Formatter.columns(full_formula_names) unless args.public_send(:"1?")
         puts full_formula_names if full_formula_names.present?
       end
       if args.cask? || (!args.formula? && args.no_named?)
@@ -100,18 +100,18 @@ module Homebrew
           args.named.to_formulae_and_casks(only: :cask, method: :resolve)
         end
         full_cask_names = cask_names.map(&:full_name).sort(&tap_and_name_comparison)
-        full_cask_names = Formatter.columns(full_cask_names) unless args.public_send(:'1?')
+        full_cask_names = Formatter.columns(full_cask_names) unless args.public_send(:"1?")
         puts full_cask_names if full_cask_names.present?
       end
     elsif args.cask?
-      list_casks(args: args)
+      list_casks(args.named.to_casks, args: args)
     elsif args.pinned? || args.versions?
       filtered_list args: args
     elsif args.no_named?
       ENV["CLICOLOR"] = nil
 
       ls_args = []
-      ls_args << "-1" if args.public_send(:'1?')
+      ls_args << "-1" if args.public_send(:"1?")
       ls_args << "-l" if args.l?
       ls_args << "-r" if args.r?
       ls_args << "-t" if args.t?
@@ -129,9 +129,13 @@ module Homebrew
         safe_system "ls", *ls_args, Cask::Caskroom.path
       end
     elsif args.verbose? || !$stdout.tty?
-      system_command! "find", args: args.named.to_kegs.map(&:to_s) + %w[-not -type d -print], print_stdout: true
+      system_command! "find", args:         args.named.to_default_kegs.map(&:to_s) + %w[-not -type d -print],
+                              print_stdout: true
     else
-      args.named.to_kegs.each { |keg| PrettyListing.new keg }
+      kegs, casks = args.named.to_formulae_to_casks(method: :default_kegs)
+
+      kegs.each { |keg| PrettyListing.new keg } if kegs.present?
+      list_casks(casks, args: args) if casks.present?
     end
   end
 
@@ -164,10 +168,10 @@ module Homebrew
     end
   end
 
-  def list_casks(args:)
+  def list_casks(casks, args:)
     Cask::Cmd::List.list_casks(
-      *args.named.to_casks,
-      one:       args.public_send(:'1?'),
+      *casks,
+      one:       args.public_send(:"1?"),
       full_name: args.full_name?,
       versions:  args.versions?,
     )
